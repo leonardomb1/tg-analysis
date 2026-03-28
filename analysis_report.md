@@ -1,7 +1,7 @@
 # Acidentes de Trabalho, Renda e Excesso de Jornada
 ## Análise Exploratória de Dados para Pesquisa de Monografia
 **Autor:** Pesquisa de monografia de graduação
-**Fontes de dados:** CAT/INSS (Brasil, 2022–2023), ILOSTAT (global, 2000–2024)
+**Fontes de dados:** CAT/INSS (Brasil, 2022–2023), ILOSTAT (global, 2000–2024), IBGE SIDRA/Censo 2010 (municipal), RAIS/MTE 2022 (SP, CE, BA)
 **Data:** Março de 2026
 
 ---
@@ -10,9 +10,11 @@
 
 > Trabalhadores sob pressão econômica — aqueles em ocupações de menor renda e setores com jornadas mais longas — estão desproporcionalmente expostos a acidentes de trabalho e óbitos ocupacionais.
 
-Este relatório apresenta uma análise exploratória inicial utilizando dois conjuntos de dados primários:
-- **CAT** (*Comunicação de Acidente de Trabalho*) do INSS — 890.000 registros individuais de acidentes no Brasil, 2022–maio de 2023
-- **ILOSTAT** — indicadores globais da OIT para lesões fatais/não fatais, horas trabalhadas semanais e rendimentos por hora, cobrindo mais de 100 países de 2000 a 2024
+Este relatório apresenta análise exploratória com quatro conjuntos de dados:
+- **CAT** (*Comunicação de Acidente de Trabalho*, INSS) — 890.000 registros individuais de acidentes no Brasil, 2022–maio 2023
+- **ILOSTAT** (OIT) — lesões fatais/não fatais, horas semanais e rendimentos por hora, >100 países, 2000–2024
+- **IBGE SIDRA / Censo 2010** — rendimento médio mensal por município (5.565 municípios)
+- **RAIS 2022** (MTE) — salário médio por CBO×CNAE×UF, estados SP, CE e BA (28,3M vínculos formais)
 
 ---
 
@@ -237,7 +239,7 @@ Os países com as maiores jornadas de trabalho são esmagadoramente de renda bai
 
 ---
 
-## 4b. Perfil Etário dos Acidentados
+## 4.3 Perfil Etário dos Acidentados
 
 A análise de faixa etária revela um padrão relevante para a hipótese: a taxa de letalidade cresce monotonicamente com a idade, e os trabalhadores mais velhos — que tendem a estar em posições de menor mobilidade ocupacional e menor renda — são os que morrem proporcionalmente mais.
 
@@ -253,7 +255,7 @@ A taxa de trabalhadores acima de 55 anos (0,759%) é **2,2× maior** do que a de
 
 ---
 
-## 4c. Mecanismos do Acidente Fatal: Agentes e Natureza das Lesões
+## 4.4 Mecanismos do Acidente Fatal: Agentes e Natureza das Lesões
 
 ### Agentes causadores mais letais (mín. 500 ocorrências)
 
@@ -307,7 +309,10 @@ A taxa de letalidade cresce monotonicamente com a idade: 0,34% aos 14–24 anos 
 ### Nível 5 — Mecanismo físico
 Os agentes e lesões mais letais são exclusivos de setores de baixo salário: energia elétrica (8,4% de letalidade), veículos rodoviários (3,0%), tratores e máquinas agrícolas (1,9–2,9%). As lesões cranianas isoladas matam 1 em cada 5 acidentados (19,9%) — típicas de quedas de altura (construção) e acidentes de trânsito (transporte).
 
-### Nível 6 — Global (comparação internacional)
+### Nível 6 — Municipal (IBGE × CAT)
+A análise de renda municipal com 5.565 municípios (seção 8) produz o resultado mais robusto desta pesquisa: **razão Q1/Q5 = 2,5×** (0,745% vs 0,295% de taxa de letalidade). A relação é estritamente monotônica — cada quintil mais rico apresenta menor taxa de óbito — e cobre toda a base CAT sem viés de seleção estadual. Esta é a evidência de maior poder demonstrativo da hipótese geográfico-econômica.
+
+### Nível 7 — Global (comparação internacional)
 O Brasil tem jornada semanal de 39,6h (comparável a EUA: 38,1h, ARG: 38,2h), mas taxa de acidente fatal de **7,43/100k** — **2,1× maior que os EUA** (3,5) e **10× maior que a Alemanha** (0,71). Isso demonstra que o problema não é a jornada média em si, mas a estrutura de desigualdade que concentra trabalhadores brasileiros em ocupações perigosas: com a mesma carga horária semanal que trabalhadores americanos, o trabalhador brasileiro médio tem 2× mais chance de morrer por acidente de trabalho. O Gini brasileiro (~0,52 vs ~0,39 nos EUA) explica essa diferença residual.
 
 ---
@@ -354,37 +359,53 @@ A correlação negativa confirma a direção da hipótese, embora o valor seja m
 
 ## 9. Proxy Setorial de Renda — RAIS × CAT
 
-Fonte: RAIS 2022 público (MTE), estados SP e CE — 35,9 milhões de vínculos formais, agregados por CBO × CNAE (2 dígitos) → 117.923 grupos. Join com a CAT: 77,6% de cobertura (690.319 de 890.000 registros).
+Fonte: RAIS 2022 público (MTE), estados SP, CE e BA — **28,3 milhões de vínculos formais** (SP: 22,4M; BA: 3,6M; CE: 2,3M), agregados por CBO × CNAE (2 dígitos) × UF → 124.138 grupos.
 
-Salários médios validados: SP R$6.200/mês, CE R$4.156/mês.
+Salários médios validados por estado: SP R$6.040/mês, BA R$4.475/mês, CE R$3.756/mês.
 
-### Quintis de salário setorial × taxa de letalidade
+**Cobertura:** Join CBO×CNAE×UF com a CAT restrito a acidentes ocorridos em SP, CE ou BA: **271.820 registros** (30,5% do total). Os outros 69,5% pertencem a estados sem RAIS disponível nesta análise (especialmente os estados do Norte e Centro-Oeste, onde as taxas de óbito são mais elevadas).
 
-| Quintil | Salário médio setor (R$) | Total acidentes | Óbitos | Taxa de letalidade |
-|---------|--------------------------|-----------------|--------|-------------------|
-| Q1 (menor salário) | R$152–1.683 | 138.035 | 560 | 0,406% |
-| Q2 | R$1.683–2.021 | 138.035 | 617 | 0,447% |
-| Q3 | R$2.021–2.595 | 138.035 | 745 | 0,540% |
-| Q4 | R$2.595–3.255 | 138.035 | 862 | 0,624% |
-| Q5 (maior salário) | R$3.255–273.071 | 138.035 | 702 | 0,509% |
+### Quintis de salário setorial × taxa de letalidade (CBO×CNAE×UF)
 
-### Correlação de Pearson (nível CBO×CNAE)
+| Quintil | Salário setor (R$) | Total acidentes | Óbitos | Taxa de letalidade |
+|---------|-------------------|-----------------|--------|-------------------|
+| Q1 (menor salário) | R$161–1.851 | 54.364 | 210 | 0,386% |
+| Q2 | R$1.851–2.249 | 54.364 | 186 | 0,342% |
+| Q3 | R$2.249–2.903 | 54.364 | 225 | 0,414% |
+| Q4 | R$2.903–4.023 | 54.364 | 241 | 0,443% |
+| Q5 (maior salário) | R$4.023–247.892 | 54.364 | 180 | 0,331% |
+
+### Correlação de Pearson (nível CBO×CNAE×UF, ≥10 acidentes)
 
 ```
-corr(salario_medio_setor, taxa_obito) ≈ 0   (n = 5.469 grupos com ≥ 10 registros)
+corr(salario_medio_setor, taxa_obito) = +0.015   (n = 3.260 grupos)
 ```
+
+### 9.1 Regressão OLS Multivariada
+
+Modelo com efeitos fixos de setor (CNAE 2 dígitos) e estado, para isolar o efeito do salário controlando por composição setorial e geográfica:
+
+```
+taxa_obito ~ log(salario_medio) + C(cnae2_div) + C(uf)
+```
+
+| Modelo | Coef. log(salário) | p-valor | R² | N |
+|--------|--------------------|---------|-----|---|
+| M1 (sem efeitos fixos) | +0.000168 | 0.825 | 0.000 | 3.260 |
+| M2 (FE setor) | +0.000917 | 0.307 | 0.020 | 3.260 |
+| M3 (FE setor + UF) | **+0.001867** | **0.045*** | 0.024 | 3.260 |
 
 ### Interpretação
 
-**A análise RAIS não confirmou a hipótese ao nível CBO×CNAE.** O padrão encontrado é contraintuitivo: Q3 e Q4 (salários intermediários) apresentam as maiores taxas de letalidade. Há três explicações:
+**A análise setorial RAIS não confirmou a hipótese.** O coeficiente de log(salário) é positivo e marginalmente significante no modelo M3 — o oposto da direção esperada. O padrão nos quintis também não é monotônico. Há três explicações para esse resultado:
 
-1. **Viés geográfico do proxy:** Os salários médios de SP e CE não representam os salários reais de trabalhadores acidentados em outros estados. Um trabalhador da construção civil em São Paulo (RAIS) ganha mais que o mesmo CBO no Maranhão ou Pará — mas ambos entram como o mesmo grupo no join com a CAT nacional.
+1. **Confundimento geográfico:** SP (alta renda, baixa letalidade por setor, alto volume de acidentes) domina 80% dos vínculos na RAIS. Os quintis de alto salário são majoritariamente acidentes paulistas — que têm menor taxa de óbito por possuírem melhor infraestrutura de emergência, não por serem menos perigosos. Os estados com maior taxa de óbito (MA, PA, PI — acima de 1%) não têm RAIS nesta análise.
 
-2. **Composição do setor formal:** Os grupos de baixo salário na RAIS SP+CE incluem principalmente serviços urbanos (comércio, limpeza) que são fisicamente menos perigosos. Os empregos mais perigosos e de menor renda (agricultura, extração, informalidade) têm baixa representação na RAIS formal.
+2. **Proxy ecológico vs. renda individual:** O salário médio do setor/ocupação/estado captura a hierarquia salarial do emprego formal, mas não a pressão econômica do trabalhador individual. Um operador de guincho em SP (RAIS: salário médio R$4.000) pode ser menos vulnerável do que um trabalhador rural no Pará (RAIS: não disponível).
 
-3. **Heterogeneidade dentro do Q5:** O quintil de maior salário inclui tanto executivos (salário muito alto, risco zero) quanto técnicos industriais e operadores de equipamentos pesados (salário alto, risco real), comprimindo a taxa média.
+3. **Sub-representação dos setores mais perigosos:** Agricultura, extração e construção informal têm baixa representação na RAIS formal. Os grupos mais perigosos e de menor renda estão ausentes ou subestimados.
 
-**Conclusão metodológica:** O join RAIS×CAT por CBO×CNAE é um proxy ecológico com limitações sérias quando a RAIS cobre apenas dois estados. Para corrigir isso seria necessário baixar a RAIS para todas as regiões do Brasil (~3 GB adicionais) e calcular o salário do CBO×CNAE×UF — reduzindo o viés geográfico. A evidência mais robusta desta análise permanece na análise municipal (IBGE): gradiente monotônico claro com razão Q1/Q5 = 2,5×.
+**Conclusão metodológica:** O proxy RAIS×CAT com 3 estados não tem poder explicativo suficiente para testar a hipótese. Para análise robusta seria necessária a RAIS nacional (todos os 27 estados). A evidência mais forte desta pesquisa permanece na **análise municipal IBGE** (seção 8), que cobre 5.565 municípios sem viés de seleção estadual: gradiente monotônico claro com razão Q1/Q5 = **2,5×** (0,745% vs 0,295%).
 
 ---
 
@@ -444,30 +465,18 @@ Construção e transporte — setores com jornadas acima de 40h/semana e entre o
 | Geográfico (municípios) | CAT × IBGE 2010 | Q1 (R$352–1050): 0,745% vs Q5 (R$1998–2934): 0,295% — razão **2,5×** ✓ |
 | Global normalizado | ILO rates | Brasil 7,43/100k — 2,1× EUA, 10× Alemanha, com mesma jornada média ✓ |
 | Jornada × setor | ILO hours + fatal | Construção 40,5h/sem + 817 óbitos históricos ✓ |
-| Proxy renda setorial | RAIS SP+CE × CAT | Resultado não confirmou hipótese — viés geográfico do proxy (SP+CE ≠ Brasil) ✗ |
+| Proxy renda setorial | RAIS SP+CE+BA × CAT (CBO×CNAE×UF) | Resultado inconcluso — coeficiente positivo, confundimento geográfico (ver seção 9) ✗ |
+| Regressão multivariada | RAIS×CAT, OLS com FE setor+UF | coef log(sal)=+0.0019, p=0.045 — positivo; SP domina e dilui sinal ✗ |
 
-### Passos de execução
+### Próximos passos para fortalecer a análise
 
-```bash
-# 1. Baixar taxas ILO (2 novos indicadores)
-uv run download_accident_data.py --skip-cat --skip-sinan
-
-# 2. Baixar RAIS (SP + CE) e IBGE municipal
-uv run download_socioeconomic_data.py
-
-# 3. Executar queries de análise no DuckDB
-duckdb  # modo interativo, copiar blocos de analysis_queries.sql
-```
-
-### Regressão multivariada (etapa futura)
-
-Quando RAIS e IBGE estiverem disponíveis, o modelo ideal é:
-
-```
-taxa_obito_setor ~ salario_medio + horas_semanais + cnae_div_FE + uf_FE
-```
-
-onde os efeitos fixos de setor (`cnae_div_FE`) e estado (`uf_FE`) controlam heterogeneidade não observada. Um coeficiente negativo e significativo para `salario_medio` seria a evidência econométrica mais robusta da hipótese.
+| Prioridade | Ação | Impacto esperado |
+|-----------|------|-----------------|
+| Alta | Baixar RAIS nacional (todas as regiões, ~4GB) | Elimina viés geográfico; permite join CBO×CNAE×UF para todos os estados |
+| Alta | Integrar SINAN (trabalhadores informais) | Captura os mais vulneráveis, ausentes da CAT formal |
+| Média | Atualizar IBGE para Censo 2022 (quando disponível) | Renda municipal de 2010 está 14 anos defasada |
+| Média | Regressão com RAIS nacional: taxa_obito ~ log(sal) + FE setor + FE UF | Teste econométrico robusto da hipótese com sinal esperado negativo |
+| Baixa | Adicionar dados de fiscalização (MTE autuações) | Controle para efeito de enforcement trabalhista por estado |
 
 ---
 
@@ -483,7 +492,8 @@ onde os efeitos fixos de setor (`cnae_div_FE`) e estado (`uf_FE`) controlam hete
 | `data/ilostat_fatal_injury_rate_by_economic_activity.parquet` | 19.130 | Taxa de acidente fatal por 100k trabalhadores, OIT, 99 países |
 | `data/ilostat_nonfatal_injury_rate_by_economic_activity.parquet` | 27.542 | Taxa de acidente não fatal por 100k trabalhadores, OIT, 99 países |
 | `data/ibge_renda_municipal.parquet` | 5.565 | Rendimento médio mensal por município, Censo IBGE 2010 |
-| `data/rais_salario_por_setor_ocupacao.parquet` | *pendente* | Salário médio por CBO×CNAE, RAIS 2022 (SP+CE) |
+| `data/rais_salario_por_setor_ocupacao.parquet` | 124.138 grupos | Salário médio por CBO×CNAE×UF, RAIS 2022 (SP+CE+BA) |
+| `data/regression_results.csv` | 97 linhas | Coeficientes OLS completos — modelo taxa_obito ~ log(sal) + FE setor + FE UF |
 
 ---
 
@@ -494,7 +504,9 @@ onde os efeitos fixos de setor (`cnae_div_FE`) e estado (`uf_FE`) controlam hete
 | `download_accident_data.py` | CAT (INSS), SINAN (DATASUS), indicadores ILO de lesões e jornada |
 | `download_socioeconomic_data.py` | RAIS (MTE), IBGE SIDRA renda municipal |
 | `analysis_queries.sql` | Queries DuckDB: quintis, correlação, ranking ILO, perfil do acidentado |
+| `regression_analysis.py` | OLS multivariada: taxa_obito ~ log(sal) + FE setor + FE UF (`uv run`) |
+| `visualize.py` | Gera as três figuras em `figures/` (`uv run`) |
 
 ---
 
-*Análise realizada com DuckDB v1.5.1 e Python/pandas/pyarrow. Consultas disponíveis em `download_accident_data.py`.*
+*Análise realizada com DuckDB v1.5.1, Python 3.11, pandas e pyarrow. Consultas SQL disponíveis em `analysis_queries.sql`. Figuras em `figures/`.*

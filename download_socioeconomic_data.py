@@ -93,7 +93,30 @@ RAIS_STATE_TO_FILE: dict[str, tuple[str, str | None]] = {
     "AM": ("RAIS_VINC_PUB_NORTE.7z", "AM"),
 }
 
-RAIS_STATES = ["SP", "CE"]
+# IBGE state code (first 2 digits of 6-digit municipality code) → UF abbreviation
+# Used to derive state when RAIS regional files lack a sigla_uf column
+# Maps IBGE state code (first 2 digits of 6-digit municipality code) → UF abbreviation
+IBGE_STATE_CODE_TO_UF: dict[str, str] = {
+    "11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP", "17": "TO",
+    "21": "MA", "22": "PI", "23": "CE", "24": "RN", "25": "PB", "26": "PE",
+    "27": "AL", "28": "SE", "29": "BA",
+    "31": "MG", "32": "ES", "33": "RJ", "35": "SP",
+    "41": "PR", "42": "SC", "43": "RS",
+    "50": "MS", "51": "MT", "52": "GO", "53": "DF",
+}
+
+# Maps UF abbreviation → full state name as used in CAT (INSS) dataset
+UF_TO_NOME: dict[str, str] = {
+    "AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas",
+    "BA": "Bahia", "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo",
+    "GO": "Goiás", "MA": "Maranhão", "MT": "Mato Grosso", "MS": "Mato Grosso do Sul",
+    "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná",
+    "PE": "Pernambuco", "PI": "Piauí", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
+    "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima", "SC": "Santa Catarina",
+    "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins",
+}
+
+RAIS_STATES = ["SP", "CE", "BA"]
 RAIS_YEAR = 2022
 
 # Chunk size for reading large CSVs (rows per chunk — keeps memory manageable)
@@ -183,6 +206,8 @@ def _aggregate_chunks(csv_path: Path, uf_filter: str | None, desc: str) -> pd.Da
     col_cnae: str | None = None
     col_wage: str | None = None
     col_uf: str | None = None
+    col_munic: str | None = None
+    use_derived_uf: bool = False
 
     agg_frames: list[pd.DataFrame] = []
     total_rows = 0
@@ -208,23 +233,37 @@ def _aggregate_chunks(csv_path: Path, uf_filter: str | None, desc: str) -> pd.Da
                     _find_col(cols, "vl_remun", "nom") or      # vl_remun_dezembro_nom fallback
                     _find_col(cols, "vl_remun")                # last resort
                 )
-                col_uf   = _find_col(cols, "sigla_uf") or _find_col(cols, "_uf")
+                col_uf    = _find_col(cols, "sigla_uf") or _find_col(cols, "_uf")
+                col_munic = _find_col(cols, "município") or _find_col(cols, "municipio")
+                use_derived_uf = col_uf is None and col_munic is not None
+                if use_derived_uf:
+                    _log("  → col sigla_uf não encontrada; UF será derivada de 'Município' (código IBGE)")
                 _log(f"Columns detected — CBO: {col_cbo}, CNAE: {col_cnae}, "
-                     f"wage: {col_wage}, UF: {col_uf}")
+                     f"wage: {col_wage}, UF: {col_uf or f'derivada de {col_munic}'}")
                 if not col_cbo or not col_cnae:
                     _log(f"ERROR: could not find CBO/CNAE columns. Available: {cols[:20]}")
                     return None
 
+            # Derive UF from municipality code when sigla_uf column is absent
+            if use_derived_uf and col_munic in chunk.columns:
+                chunk["_uf_derived"] = (
+                    chunk[col_munic].astype(str).str.zfill(6).str[:2]
+                    .map(IBGE_STATE_CODE_TO_UF)
+                )
+                col_uf_for_filter: str | None = "_uf_derived"
+            else:
+                col_uf_for_filter = col_uf
+
             # Filter by UF if needed (regional file)
-            if uf_filter and col_uf and col_uf in chunk.columns:
-                chunk = chunk[chunk[col_uf].str.strip() == uf_filter]
+            if uf_filter and col_uf_for_filter and col_uf_for_filter in chunk.columns:
+                chunk = chunk[chunk[col_uf_for_filter].fillna("") == uf_filter]
 
             if chunk.empty:
                 continue
 
             # Keep only the columns we need
-            keep = [c for c in [col_cbo, col_cnae, col_wage, col_uf] if c]
-            chunk = chunk[keep].copy()
+            keep = [c for c in [col_cbo, col_cnae, col_wage, col_uf_for_filter] if c]
+            chunk = chunk[[c for c in keep if c in chunk.columns]].copy()
 
             # Convert wage to numeric
             if col_wage and col_wage in chunk.columns:
@@ -234,8 +273,8 @@ def _aggregate_chunks(csv_path: Path, uf_filter: str | None, desc: str) -> pd.Da
             chunk["cnae2"] = chunk[col_cnae].astype(str).str[:2]
 
             group_cols = [col_cbo, "cnae2"]
-            if col_uf and col_uf in chunk.columns:
-                chunk["uf"] = chunk[col_uf].str.strip()
+            if col_uf_for_filter and col_uf_for_filter in chunk.columns:
+                chunk["uf"] = chunk[col_uf_for_filter].fillna("").str.strip()
                 group_cols.append("uf")
 
             if col_wage and col_wage in chunk.columns:
@@ -276,6 +315,9 @@ def _aggregate_chunks(csv_path: Path, uf_filter: str | None, desc: str) -> pd.Da
     )
     result["salario_medio"] = result["salario_sum"] / result["n_trabalhadores"].replace(0, float("nan"))
     result.drop(columns=["salario_sum"], inplace=True)
+    # Normalize UF abbreviation → full state name to match CAT column "uf_munic._empregador"
+    if "uf" in result.columns:
+        result["uf"] = result["uf"].map(UF_TO_NOME).fillna(result["uf"])
     return result
 
 

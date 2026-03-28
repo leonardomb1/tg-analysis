@@ -89,21 +89,24 @@ WITH rais AS (
     SELECT
         LPAD(CAST(cbo AS VARCHAR), 6, '0') AS cbo,
         cnae2                              AS cnae2_div,
+        uf,
         AVG(salario_medio)                 AS salario_medio_setor
     FROM 'data/rais_salario_por_setor_ocupacao.parquet'
     WHERE salario_medio > 0
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ),
 cat_com_salario AS (
     SELECT
         SPLIT_PART(c.cbo, '-', 1)                        AS cbo,
         CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]      AS cnae2_div,
+        trim(c."uf_munic._empregador")                   AS uf,
         trim(c.indica_óbito_acidente)                     AS obito,
         r.salario_medio_setor
     FROM 'data/cat_acidentes_trabalho.parquet' c
     JOIN rais r
-        ON SPLIT_PART(c.cbo, '-', 1)                    = r.cbo
+        ON  SPLIT_PART(c.cbo, '-', 1)                   = r.cbo
         AND CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]  = r.cnae2_div
+        AND trim(c."uf_munic._empregador")               = r.uf
     WHERE r.salario_medio_setor IS NOT NULL
 ),
 quintis AS (
@@ -133,24 +136,27 @@ WITH rais AS (
     SELECT
         LPAD(CAST(cbo AS VARCHAR), 6, '0') AS cbo,
         cnae2                              AS cnae2_div,
+        uf,
         AVG(salario_medio)                 AS salario_medio_setor
     FROM 'data/rais_salario_por_setor_ocupacao.parquet'
     WHERE salario_medio > 0
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ),
 grupo_stats AS (
     SELECT
         SPLIT_PART(c.cbo, '-', 1)                        AS cbo,
         CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]      AS cnae2_div,
+        r.uf,
         r.salario_medio_setor,
         COUNT(*)                                         AS n_acidentes,
         SUM(CASE WHEN trim(c.indica_óbito_acidente) = 'Sim' THEN 1 ELSE 0 END)::DOUBLE
             / NULLIF(COUNT(*), 0)                        AS taxa_obito
     FROM 'data/cat_acidentes_trabalho.parquet' c
     JOIN rais r
-        ON SPLIT_PART(c.cbo, '-', 1)                   = r.cbo
-        AND CAST(c."cnae2.0_empregador" AS VARCHAR)[:2] = r.cnae2_div
-    GROUP BY 1, 2, 3
+        ON  SPLIT_PART(c.cbo, '-', 1)                   = r.cbo
+        AND CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]  = r.cnae2_div
+        AND trim(c."uf_munic._empregador")               = r.uf
+    GROUP BY 1, 2, 3, 4
     HAVING COUNT(*) >= 10
 )
 SELECT

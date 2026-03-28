@@ -251,6 +251,9 @@ ILO_SDMX_BASE = "https://sdmx.ilo.org/rest/data/ILO,{dataflow}?format=csv&startP
 ILO_INDICATORS = {
     "DF_INJ_FATL_ECO_NB": "fatal_injuries_by_economic_activity",
     "DF_INJ_NFTL_ECO_NB": "nonfatal_injuries_by_economic_activity",
+    # Rates per 100,000 workers — comparable across countries regardless of workforce size
+    "DF_INJ_FATL_ECO_RT": "fatal_injury_rate_by_economic_activity",
+    "DF_INJ_NFTL_ECO_RT": "nonfatal_injury_rate_by_economic_activity",
     # Hours worked and wages — direct context for overwork/income hypothesis
     "DF_HOW_XEES_SEX_ECO_NB": "mean_weekly_hours_by_sex_economic_activity",
     "DF_EAR_EHRA_SEX_ECO_NB": "mean_hourly_earnings_by_sex_economic_activity",

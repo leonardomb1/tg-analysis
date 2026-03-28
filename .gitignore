@@ -1,0 +1,21 @@
+# Data files
+data/
+*.parquet
+*.dbc
+*.dbf
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# uv
+.uv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~

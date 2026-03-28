@@ -240,6 +240,95 @@ SELECT
 FROM por_municipio;
 
 
+-- 3c. Controle de composição setorial: o gradiente de renda persiste?
+--     Para cada município: calcula % de acidentes em setores de alto risco
+--     (agropecuária, extração, construção, transporte terrestre — CNAEs 01,02,06,08,09,41,42,43,49)
+--     Depois estratifica por tercil de % setor perigoso × quintil de renda
+--     Se o gradiente de renda aparecer em TODOS os tercis → evidência de efeito independente da renda
+--     Se aparecer só no tercil de BAIXO risco setorial → o padrão é explicado pela composição setorial
+
+WITH ibge AS (
+    SELECT LEFT(cod_municipio, 6) AS cod_munic_6, renda_media_mensal
+    FROM 'data/ibge_renda_municipal.parquet'
+    WHERE renda_media_mensal > 0
+),
+por_municipio AS (
+    SELECT
+        LEFT(SPLIT_PART(c.munic_empr, '-', 1), 6)       AS cod_munic_6,
+        i.renda_media_mensal,
+        COUNT(*)                                         AS n_acidentes,
+        SUM(CASE WHEN trim(c.indica_óbito_acidente) = 'Sim' THEN 1 ELSE 0 END)::DOUBLE
+            / NULLIF(COUNT(*), 0)                        AS taxa_obito,
+        -- Proporção de acidentes em setores de alto risco (CNAE divisão 2 dígitos)
+        AVG(CASE WHEN CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]
+                      IN ('01','02','06','08','09','41','42','43','49')
+                 THEN 1.0 ELSE 0.0 END)                  AS pct_setor_perigoso
+    FROM 'data/cat_acidentes_trabalho.parquet' c
+    JOIN ibge i ON LEFT(SPLIT_PART(c.munic_empr, '-', 1), 6) = i.cod_munic_6
+    WHERE c.munic_empr NOT LIKE '000000%'
+    GROUP BY 1, 2
+    HAVING COUNT(*) >= 10
+),
+estratificado AS (
+    SELECT *,
+        NTILE(3) OVER (ORDER BY pct_setor_perigoso)    AS tercil_setor,
+        NTILE(5) OVER (ORDER BY renda_media_mensal)    AS quintil_renda
+    FROM por_municipio
+)
+SELECT
+    tercil_setor,
+    quintil_renda,
+    COUNT(*)                                           AS n_municipios,
+    CAST(MIN(pct_setor_perigoso * 100) AS INT)         AS pct_perigoso_min,
+    CAST(MAX(pct_setor_perigoso * 100) AS INT)         AS pct_perigoso_max,
+    CAST(AVG(renda_media_mensal) AS INT)               AS renda_media,
+    ROUND(AVG(taxa_obito) * 100, 3)                    AS taxa_obito_media_pct
+FROM estratificado
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+-- Correlação parcial: renda × taxa_obito dentro de cada tercil de composição setorial
+WITH ibge AS (
+    SELECT LEFT(cod_municipio, 6) AS cod_munic_6, renda_media_mensal
+    FROM 'data/ibge_renda_municipal.parquet'
+    WHERE renda_media_mensal > 0
+),
+por_municipio AS (
+    SELECT
+        LEFT(SPLIT_PART(c.munic_empr, '-', 1), 6)       AS cod_munic_6,
+        i.renda_media_mensal,
+        COUNT(*)                                         AS n_acidentes,
+        SUM(CASE WHEN trim(c.indica_óbito_acidente) = 'Sim' THEN 1 ELSE 0 END)::DOUBLE
+            / NULLIF(COUNT(*), 0)                        AS taxa_obito,
+        AVG(CASE WHEN CAST(c."cnae2.0_empregador" AS VARCHAR)[:2]
+                      IN ('01','02','06','08','09','41','42','43','49')
+                 THEN 1.0 ELSE 0.0 END)                  AS pct_setor_perigoso
+    FROM 'data/cat_acidentes_trabalho.parquet' c
+    JOIN ibge i ON LEFT(SPLIT_PART(c.munic_empr, '-', 1), 6) = i.cod_munic_6
+    WHERE c.munic_empr NOT LIKE '000000%'
+    GROUP BY 1, 2
+    HAVING COUNT(*) >= 10
+),
+com_tercil AS (
+    SELECT *,
+        NTILE(3) OVER (ORDER BY pct_setor_perigoso) AS tercil_setor
+    FROM por_municipio
+)
+SELECT
+    tercil_setor,
+    CASE tercil_setor
+        WHEN 1 THEN 'Baixo % setor perigoso'
+        WHEN 2 THEN 'Médio % setor perigoso'
+        WHEN 3 THEN 'Alto % setor perigoso'
+    END                                                  AS perfil_setor,
+    ROUND(AVG(pct_setor_perigoso) * 100, 1)             AS pct_perigoso_medio,
+    ROUND(corr(renda_media_mensal, taxa_obito), 4)       AS pearson_renda_obito,
+    COUNT(*)                                             AS n_municipios
+FROM com_tercil
+GROUP BY 1, 2
+ORDER BY 1;
+
+
 -- =============================================================================
 -- BLOCO 4 — Análise global com dados ILO
 -- =============================================================================

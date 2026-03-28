@@ -19,13 +19,21 @@ Execução: uv run visualize.py
 Saída: figures/
 """
 
+import sys
 from pathlib import Path
 
 import duckdb
 import matplotlib
+matplotlib.use("Agg")  # headless backend — works on Windows/Linux/macOS without a display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# ── Windows UTF-8 fix ────────────────────────────────────────────────────────
+if sys.platform == "win32":
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
 
 matplotlib.rcParams["font.family"] = "DejaVu Sans"
 matplotlib.rcParams["axes.spines.top"] = False

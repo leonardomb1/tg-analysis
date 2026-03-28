@@ -23,10 +23,18 @@ têm maior taxa de óbito, controlando por setor e estado.
 Execução: uv run regression_analysis.py
 """
 
+import sys
+
 import duckdb
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
+
+# ── Windows UTF-8 fix ────────────────────────────────────────────────────────
+if sys.platform == "win32":
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
 
 DATA_DIR = "data"
 OUT_CSV_RAIS   = f"{DATA_DIR}/regression_results_rais.csv"

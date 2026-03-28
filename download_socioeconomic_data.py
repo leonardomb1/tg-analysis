@@ -28,6 +28,7 @@ Usage:
 """
 
 import io
+import sys
 import time
 from datetime import datetime
 from ftplib import FTP, error_perm
@@ -38,6 +39,16 @@ import pandas as pd
 import py7zr
 import requests
 from tqdm import tqdm
+
+# ── Windows UTF-8 fix ────────────────────────────────────────────────────────
+# Windows CMD/PowerShell default to cp1252; Portuguese chars would UnicodeError.
+# reconfigure() is available on Python 3.7+ when stdout is a real TTY or file.
+if sys.platform == "win32":
+    for _s in (sys.stdout, sys.stderr):
+        if hasattr(_s, "reconfigure"):
+            _s.reconfigure(encoding="utf-8", errors="replace")
+
+_TQDM_ASCII = sys.platform == "win32"   # use plain ASCII bar on Windows CMD
 
 
 def _log(msg: str) -> None:
@@ -158,6 +169,7 @@ def _download_file_ftp(ftp_url: str, dest: Path, desc: str) -> bool:
             desc=desc,
             dynamic_ncols=True,
             miniters=1,
+            ascii=_TQDM_ASCII,
         ) as pbar:
             def _write(data: bytes) -> None:
                 nonlocal downloaded
@@ -524,7 +536,7 @@ def _download_file_ftp_caged(remote_path: str, dest: Path, desc: str) -> bool:
         downloaded = 0
         with open(dest, "wb") as f, tqdm(
             total=file_size, unit="B", unit_scale=True, unit_divisor=1024,
-            desc=desc, dynamic_ncols=True, miniters=1,
+            desc=desc, dynamic_ncols=True, miniters=1, ascii=_TQDM_ASCII,
         ) as pbar:
             def _write(data: bytes) -> None:
                 nonlocal downloaded

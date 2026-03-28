@@ -482,6 +482,249 @@ def download_ibge_renda() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 3.  Novo CAGED — Cadastro Geral de Empregados e Desempregados (MTE)
+# ─────────────────────────────────────────────────────────────────────────
+# Novo CAGED (from Jan/2020): monthly hirings & firings across all formal CLT workers.
+# Unlike RAIS (end-of-year stock), CAGED records salary at the moment of hire/fire.
+# Advantage over RAIS: one national FTP directory, no regional splitting needed.
+#
+# FTP structure:
+#   /pdet/microdados/NOVO CAGED/{year}/{YYYYMM}/CAGEDMOV{YYYYMM}.7z
+#
+# Key columns in CAGEDMOV files (semicolon-delimited, latin-1):
+#   cbo2002ocupação      — 6-digit CBO occupation code (already a string)
+#   subclasse            — CNAE 2.0 subclass (7 chars, e.g. "4711302") → first 2 = division
+#   uf                   — IBGE state numeric code (11–53, integer)
+#   salário              — monthly salary (decimal comma)
+#   saldomovimentação    — +1 = hire, -1 = fire (both have salary data)
+#
+# We aggregate all movements (hirings + firings) per CBO × CNAE-division × UF,
+# computing the average salary. This gives a national salary proxy for all 27 states.
+
+CAGED_FTP_BASE = "/pdet/microdados/NOVO CAGED"
+CAGED_YEAR = 2022
+CAGED_CHUNK_SIZE = 500_000
+
+
+def _download_file_ftp_caged(remote_path: str, dest: Path, desc: str) -> bool:
+    """Download a single file from MTE FTP using an already-open path convention."""
+    from ftplib import FTP, error_perm
+    host = "ftp.mtps.gov.br"
+    try:
+        ftp = FTP(host, timeout=60)
+        ftp.login()
+        ftp.set_pasv(True)
+        ftp.encoding = "latin-1"
+        try:
+            file_size = ftp.size(remote_path)
+        except Exception:
+            file_size = None
+        size_str = f"{file_size/1e6:.0f} MB" if file_size else "? MB"
+        _log(f"  Baixando {dest.name} ({size_str}) ...")
+        downloaded = 0
+        with open(dest, "wb") as f, tqdm(
+            total=file_size, unit="B", unit_scale=True, unit_divisor=1024,
+            desc=desc, dynamic_ncols=True, miniters=1,
+        ) as pbar:
+            def _write(data: bytes) -> None:
+                nonlocal downloaded
+                f.write(data)
+                downloaded += len(data)
+                pbar.update(len(data))
+            ftp.retrbinary(f"RETR {remote_path}", _write, blocksize=262144)
+        ftp.quit()
+        if dest.stat().st_size > 10_000:
+            return True
+        dest.unlink(missing_ok=True)
+        return False
+    except Exception as exc:
+        _log(f"  FTP error ({desc}): {exc}")
+        dest.unlink(missing_ok=True)
+        return False
+
+
+def download_caged(year: int = CAGED_YEAR) -> None:
+    """Download Novo CAGED monthly files for the given year and save aggregated Parquet.
+
+    Downloads all 12 monthly CAGEDMOV files, aggregates salary by CBO × CNAE-division × UF,
+    and saves to data/caged_salario_por_setor_ocupacao.parquet.
+    Compressed .7z files are cached in data/caged_raw/ to allow re-runs without re-downloading.
+    """
+    raw_dir = DATA_DIR / "caged_raw"
+    raw_dir.mkdir(exist_ok=True)
+
+    all_monthly: list[pd.DataFrame] = []
+
+    for month in range(1, 13):
+        yyyymm = f"{year}{month:02d}"
+        filename = f"CAGEDMOV{yyyymm}.7z"
+        remote_path = f"{CAGED_FTP_BASE}/{year}/{yyyymm}/{filename}"
+        archive_path = raw_dir / filename
+
+        # Download if not cached
+        if archive_path.exists() and archive_path.stat().st_size > 10_000:
+            _log(f"CAGED {yyyymm}: já em cache ({archive_path.stat().st_size/1e6:.0f} MB)")
+        else:
+            if not _download_file_ftp_caged(remote_path, archive_path, yyyymm):
+                _log(f"CAGED {yyyymm}: download falhou — pulando")
+                continue
+
+        # Extract to temp dir, aggregate, then delete CSV to save disk
+        extract_dir = raw_dir / yyyymm
+        extract_dir.mkdir(exist_ok=True)
+        existing = list(extract_dir.glob("*.txt")) + list(extract_dir.glob("*.csv"))
+
+        if existing and existing[0].stat().st_size > 10_000:
+            csv_path = existing[0]
+            _log(f"CAGED {yyyymm}: já extraído ({csv_path.stat().st_size/1e6:.0f} MB)")
+        else:
+            _log(f"CAGED {yyyymm}: extraindo {archive_path.stat().st_size/1e6:.0f} MB ...")
+            t0 = time.monotonic()
+            try:
+                with py7zr.SevenZipFile(archive_path, mode="r") as z:
+                    z.extractall(path=extract_dir)
+            except Exception as exc:
+                _log(f"CAGED {yyyymm}: extração falhou — {exc}")
+                continue
+            _log(f"CAGED {yyyymm}: extraído em {time.monotonic()-t0:.0f}s")
+            existing = list(extract_dir.glob("*.txt")) + list(extract_dir.glob("*.csv"))
+            if not existing:
+                _log(f"CAGED {yyyymm}: nenhum arquivo encontrado após extração")
+                continue
+            csv_path = existing[0]
+
+        # Aggregate in chunks
+        _log(f"CAGED {yyyymm}: agregando {csv_path.stat().st_size/1e6:.0f} MB em chunks ...")
+        t0 = time.monotonic()
+        monthly_agg = _aggregate_caged_chunks(csv_path, yyyymm)
+        if monthly_agg is not None:
+            all_monthly.append(monthly_agg)
+            _log(f"CAGED {yyyymm}: {len(monthly_agg):,} grupos CBO×CNAE×UF em {time.monotonic()-t0:.0f}s")
+
+        # Delete extracted CSV to save disk (keep the .7z)
+        csv_path.unlink(missing_ok=True)
+
+    if not all_monthly:
+        _log("CAGED: nenhum dado carregado.")
+        return
+
+    _log("CAGED: consolidando 12 meses ...")
+    combined = pd.concat(all_monthly, ignore_index=True)
+    result = (
+        combined.groupby(["cbo", "cnae2", "uf"], observed=True)
+        .agg(salario_sum=("salario_sum", "sum"), n_trabalhadores=("n", "sum"))
+        .reset_index()
+    )
+    result["salario_medio"] = (
+        result["salario_sum"] / result["n_trabalhadores"].replace(0, float("nan"))
+    )
+    result.drop(columns=["salario_sum"], inplace=True)
+
+    out = DATA_DIR / "caged_salario_por_setor_ocupacao.parquet"
+    result.to_parquet(out, index=False, engine="pyarrow")
+    n_mov = int(result["n_trabalhadores"].sum())
+    n_ufs = result["uf"].nunique()
+    _log(f"CAGED salvo → {out}  ({len(result):,} grupos CBO×CNAE×UF, {n_mov:,} movimentações, {n_ufs} UFs)")
+
+
+def _normalize_col_name(s: str) -> str:
+    """Normalize a column name: strip accents, lowercase, spaces→underscores."""
+    import unicodedata
+    nfkd = unicodedata.normalize("NFKD", s)
+    ascii_str = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return ascii_str.strip().lower().replace(" ", "_")
+
+
+def _aggregate_caged_chunks(csv_path: Path, desc: str) -> pd.DataFrame | None:
+    """Read a CAGED monthly CSV in chunks and aggregate salary by CBO × CNAE-div × UF."""
+    col_cbo: str | None = None
+    col_cnae: str | None = None
+    col_wage: str | None = None
+    col_uf: str | None = None
+    agg_frames: list[pd.DataFrame] = []
+    total_rows = 0
+    chunk_n = 0
+
+    try:
+        reader = pd.read_csv(
+            csv_path, sep=";", encoding="utf-8", low_memory=False,
+            decimal=",", chunksize=CAGED_CHUNK_SIZE, dtype=str,
+        )
+        for chunk in reader:
+            chunk_n += 1
+            chunk.columns = [_normalize_col_name(c) for c in chunk.columns]
+
+            if chunk_n == 1:
+                cols = list(chunk.columns)
+                col_cbo  = _find_col(cols, "cbo")
+                col_cnae = _find_col(cols, "subclasse") or _find_col(cols, "cnae")
+                col_wage = _find_col(cols, "salario") or _find_col(cols, "salário")
+                col_uf   = _find_col(cols, "uf")
+                _log(f"  Colunas — CBO: {col_cbo}, CNAE: {col_cnae}, "
+                     f"salário: {col_wage}, UF: {col_uf}")
+                if not col_cbo or not col_cnae or not col_wage or not col_uf:
+                    _log(f"  ERRO: coluna essencial não encontrada. Disponíveis: {cols[:20]}")
+                    return None
+
+            # Map UF numeric code → full state name (to match CAT)
+            chunk["uf_nome"] = (
+                chunk[col_uf].astype(str).str.strip().str.zfill(2)
+                .map(IBGE_STATE_CODE_TO_UF)
+                .map(UF_TO_NOME)
+            )
+
+            # Keep only rows with valid UF
+            chunk = chunk[chunk["uf_nome"].notna()].copy()
+            if chunk.empty:
+                continue
+
+            # CBO: already 6-char string in CAGED
+            chunk["cbo"] = chunk[col_cbo].astype(str).str.strip().str.zfill(6)
+
+            # CNAE division: first 2 chars of subclasse (e.g. "4711302" → "47")
+            chunk["cnae2"] = chunk[col_cnae].astype(str).str.strip().str[:2]
+
+            # Salary: convert from string with decimal comma
+            chunk["salario_val"] = pd.to_numeric(
+                chunk[col_wage].astype(str).str.replace(",", ".", regex=False),
+                errors="coerce"
+            )
+
+            # Filter valid salary (> 0)
+            chunk = chunk[chunk["salario_val"] > 0]
+            if chunk.empty:
+                continue
+
+            grp = (
+                chunk.groupby(["cbo", "cnae2", "uf_nome"], observed=True)
+                .agg(salario_sum=("salario_val", "sum"), n=("salario_val", "count"))
+                .reset_index()
+                .rename(columns={"uf_nome": "uf"})
+            )
+            agg_frames.append(grp)
+            total_rows += len(chunk)
+
+            if chunk_n % 5 == 0:
+                _log(f"  ... {total_rows:,} linhas processadas ({chunk_n} chunks)")
+
+    except Exception as exc:
+        _log(f"  {desc}: erro na leitura — {exc}")
+        return None
+
+    if not agg_frames:
+        return None
+
+    _log(f"  {desc}: {total_rows:,} movimentações válidas em {chunk_n} chunks")
+    combined = pd.concat(agg_frames, ignore_index=True)
+    result = (
+        combined.groupby(["cbo", "cnae2", "uf"], observed=True)
+        .agg(salario_sum=("salario_sum", "sum"), n=("n", "sum"))
+        .reset_index()
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -493,6 +736,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--skip-rais", action="store_true", help="Skip RAIS download")
     parser.add_argument("--skip-ibge", action="store_true", help="Skip IBGE SIDRA download")
+    parser.add_argument("--skip-caged", action="store_true", help="Skip Novo CAGED download")
     parser.add_argument(
         "--rais-states",
         nargs="+",
@@ -506,6 +750,12 @@ if __name__ == "__main__":
         default=RAIS_YEAR,
         help=f"Year for RAIS download (default: {RAIS_YEAR})",
     )
+    parser.add_argument(
+        "--caged-year",
+        type=int,
+        default=CAGED_YEAR,
+        help=f"Year for CAGED download (default: {CAGED_YEAR})",
+    )
     args = parser.parse_args()
 
     _log("=" * 52)
@@ -514,12 +764,16 @@ if __name__ == "__main__":
     _log("=" * 52)
 
     if not args.skip_rais:
-        _log(f"[1/2] RAIS {args.rais_year} — UFs: {', '.join(args.rais_states)}")
+        _log(f"[1/3] RAIS {args.rais_year} — UFs: {', '.join(args.rais_states)}")
         download_rais(year=args.rais_year, states=args.rais_states)
 
     if not args.skip_ibge:
-        _log("[2/2] IBGE SIDRA renda municipal")
+        _log("[2/3] IBGE SIDRA renda municipal")
         download_ibge_renda()
+
+    if not args.skip_caged:
+        _log(f"[3/3] Novo CAGED {args.caged_year} — nacional (27 UFs)")
+        download_caged(year=args.caged_year)
 
     _log("Done. Arquivos em ./data/:")
     for f in sorted(DATA_DIR.glob("*.parquet")):
